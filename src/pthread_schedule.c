@@ -49,6 +49,24 @@ chunk_t schedule_static(schedule_context_t *context) {
         return done_chunk();
     }
 
+    if (context->chunk_size > 0) {
+        long stride = (long)context->num_threads * context->chunk_size;
+        long start_index = (long)context->thread_id * context->chunk_size +
+                           context->local_state * stride;
+
+        if (start_index >= context->total_iterations) {
+            return done_chunk();
+        }
+
+        long end_index = start_index + context->chunk_size;
+        if (end_index > context->total_iterations) {
+            end_index = context->total_iterations;
+        }
+
+        context->local_state++;
+        return (chunk_t){start_index, end_index, 0};
+    }
+
     if (context->local_state != 0) {
         return done_chunk();
     }
