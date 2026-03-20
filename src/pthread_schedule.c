@@ -84,19 +84,13 @@ chunk_t schedule_static(schedule_context_t *context) {
 
 chunk_t schedule_dynamic(schedule_context_t *context) {
     if (!has_basic_context(context) ||
-        context->lock == NULL ||
         context->shared_counter == NULL ||
         context->chunk_size <= 0) {
         return done_chunk();
     }
 
-    if (pthread_mutex_lock(context->lock) != 0) {
-        return done_chunk();
-    }
-
-    long start_index = *context->shared_counter;
+    long start_index = atomic_fetch_add(context->shared_counter, context->chunk_size);
     if (start_index >= context->total_iterations) {
-        pthread_mutex_unlock(context->lock);
         return done_chunk();
     }
 
@@ -104,42 +98,36 @@ chunk_t schedule_dynamic(schedule_context_t *context) {
     if (end_index > context->total_iterations) {
         end_index = context->total_iterations;
     }
-    *context->shared_counter = end_index;
-    pthread_mutex_unlock(context->lock);
 
     return (chunk_t){start_index, end_index, 0};
 }
 
 chunk_t schedule_guided(schedule_context_t *context) {
     if (!has_basic_context(context) ||
-        context->lock == NULL ||
         context->shared_counter == NULL ||
         context->chunk_size <= 0) {
         return done_chunk();
     }
 
-    if (pthread_mutex_lock(context->lock) != 0) {
-        return done_chunk();
-    }
+    long start_index = atomic_load(context->shared_counter);
+    long end_index;
+    
+    do {
+        long remaining_iterations = context->total_iterations - start_index;
+        if (remaining_iterations <= 0) {
+            return done_chunk();
+        }
 
-    long start_index = *context->shared_counter;
-    long remaining_iterations = context->total_iterations - start_index;
-    if (remaining_iterations <= 0) {
-        pthread_mutex_unlock(context->lock);
-        return done_chunk();
-    }
+        long chunk_size = (remaining_iterations + context->num_threads - 1) / context->num_threads;
+        if (chunk_size < context->chunk_size) {
+            chunk_size = context->chunk_size;
+        }
 
-    long chunk_size = (remaining_iterations + context->num_threads - 1) / context->num_threads;
-    if (chunk_size < context->chunk_size) {
-        chunk_size = context->chunk_size;
-    }
-
-    long end_index = start_index + chunk_size;
-    if (end_index > context->total_iterations) {
-        end_index = context->total_iterations;
-    }
-    *context->shared_counter = end_index;
-    pthread_mutex_unlock(context->lock);
+        end_index = start_index + chunk_size;
+        if (end_index > context->total_iterations) {
+            end_index = context->total_iterations;
+        }
+    } while (!atomic_compare_exchange_weak(context->shared_counter, &start_index, end_index));
 
     return (chunk_t){start_index, end_index, 0};
 }
@@ -183,11 +171,11 @@ int schedule_parallel_for(long total_iterations,
                           void *user_data) {
     pthread_t *threads = NULL;
     schedule_parallel_worker_t *workers = NULL;
-    pthread_mutex_t lock;
-    int lock_initialized = 0;
-    long shared_counter = 0;
+    atomic_long shared_counter;
     int created_threads = 0;
     int status = 0;
+
+    atomic_init(&shared_counter, 0);
 
     if (total_iterations < 0 ||
         num_threads <= 0 ||
@@ -209,15 +197,6 @@ int schedule_parallel_for(long total_iterations,
         return -1;
     }
 
-    if (policy == SCHEDULE_DYNAMIC || policy == SCHEDULE_GUIDED) {
-        if (pthread_mutex_init(&lock, NULL) != 0) {
-            free(threads);
-            free(workers);
-            return -1;
-        }
-        lock_initialized = 1;
-    }
-
     for (int t = 0; t < num_threads; ++t) {
         workers[t].sched.thread_id = t;
         workers[t].sched.num_threads = num_threads;
@@ -225,7 +204,6 @@ int schedule_parallel_for(long total_iterations,
         workers[t].sched.chunk_size = chunk_size;
         workers[t].sched.shared_counter =
             (policy == SCHEDULE_STATIC) ? NULL : &shared_counter;
-        workers[t].sched.lock = (policy == SCHEDULE_STATIC) ? NULL : &lock;
         workers[t].sched.local_state = 0;
         workers[t].policy = policy;
         workers[t].callback = callback;
@@ -246,9 +224,6 @@ int schedule_parallel_for(long total_iterations,
         }
     }
 
-    if (lock_initialized) {
-        pthread_mutex_destroy(&lock);
-    }
     free(threads);
     free(workers);
 

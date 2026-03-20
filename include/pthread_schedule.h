@@ -4,6 +4,7 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdatomic.h>
 
 typedef enum schedule_policy {
     SCHEDULE_STATIC    = 0,
@@ -17,8 +18,7 @@ typedef struct {
     int             num_threads;
     long            total_iterations;
     long            chunk_size;
-    long            *shared_counter;
-    pthread_mutex_t *lock;   
+    atomic_long     *shared_counter;
     long            local_state;
 } schedule_context_t;
 
