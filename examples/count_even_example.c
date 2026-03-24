@@ -4,7 +4,10 @@
 #include <stdlib.h>
 #include <time.h>
 
-static long count_even_reduce_callback(chunk_t chunk, void *user_data) {
+static long count_even_reduce_callback(chunk_t chunk, int thread_id,
+                                       void *user_data, int *error) {
+  (void)thread_id;
+  (void)error;
   const int *array = (const int *)user_data;
   long local_count = 0;
   for (long i = chunk.start_index; i < chunk.end_index; ++i) {
@@ -19,9 +22,9 @@ static long run_policy(const int *array, long total_iterations, int num_threads,
                        long chunk_size, schedule_policy_t policy) {
   long total_even_count = 0;
 
-  if (schedule_parallel_reduce_long(total_iterations, num_threads, chunk_size, policy,
-                                    count_even_reduce_callback, (void*)array,
-                                    &total_even_count) != 0) {
+  if (schedule_parallel_reduce_long(total_iterations, num_threads, chunk_size,
+                                    policy, count_even_reduce_callback,
+                                    (void *)array, &total_even_count) != 0) {
     fprintf(stderr, "schedule_parallel_reduce_long failed.\n");
     return -1;
   }
@@ -71,14 +74,16 @@ int main(void) {
     long count = run_policy(data, n, num_threads, chunk_size, policy);
 
     clock_gettime(CLOCK_MONOTONIC, &end);
-    double elapsed = (end.tv_sec - start.tv_sec) + (end.tv_nsec - start.tv_nsec) / 1e9;
+    double elapsed =
+        (end.tv_sec - start.tv_sec) + (end.tv_nsec - start.tv_nsec) / 1e9;
 
     if (count < 0) {
       fprintf(stderr, "%s scheduling failed.\n", policy_name(policy));
       free(data);
       return EXIT_FAILURE;
     }
-    printf("Policy=%-10s | count=%-8ld | time=%.4f seconds\n", policy_name(policy), count, elapsed);
+    printf("Policy=%-10s | count=%-8ld | time=%.4f seconds\n",
+           policy_name(policy), count, elapsed);
   }
 
   free(data);
