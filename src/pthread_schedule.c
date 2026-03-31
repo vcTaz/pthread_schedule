@@ -5,7 +5,7 @@
 #include <string.h>
 
 /* ------------------------------------------------------------------ */
-/*  Cache-line padding                                                 */
+/* Cache-line padding                                                  */
 /* ------------------------------------------------------------------ */
 
 #ifndef CACHE_LINE_SIZE
@@ -28,7 +28,7 @@ typedef struct {
 } padded_long_t;
 
 /* ------------------------------------------------------------------ */
-/*  Internal helpers                                                    */
+/* Internal helpers                                                    */
 /* ------------------------------------------------------------------ */
 
 static chunk_t (*const schedule_functions[])(schedule_context_t *) = {
@@ -51,7 +51,7 @@ static int is_cancelled(const schedule_context_t *context) {
   return context->cancel != NULL && atomic_load(context->cancel) != 0;
 }
 
-/* Normalise chunk_size: for dynamic/guided, default to 1 when <= 0
+/* Normalize chunk_size: for dynamic/guided, default to 1 when <= 0
  * (matching OpenMP defaults). Static with 0 already means even
  * partitioning, so it is left alone. */
 static long normalise_chunk_size(schedule_policy_t policy, long chunk_size) {
@@ -61,7 +61,7 @@ static long normalise_chunk_size(schedule_policy_t policy, long chunk_size) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Scheduling algorithms                                              */
+/* Scheduling algorithms                                               */
 /* ------------------------------------------------------------------ */
 
 chunk_t schedule_static(schedule_context_t *context) {
@@ -87,7 +87,7 @@ chunk_t schedule_static(schedule_context_t *context) {
     return (chunk_t){start_index, end_index, 0};
   }
 
-  /* chunk_size == 0  →  single contiguous block per thread */
+  /* chunk_size == 0 means one contiguous block per thread. */
   if (context->local_state != 0) {
     return done_chunk();
   }
@@ -170,7 +170,7 @@ chunk_t schedule_next_chunk(schedule_context_t *context,
 }
 
 /* ------------------------------------------------------------------ */
-/*  schedule_execute  (single-thread chunk loop with cancel support)    */
+/* schedule_execute: single-thread chunk loop with cancellation        */
 /* ------------------------------------------------------------------ */
 
 int schedule_execute(schedule_context_t *context, schedule_policy_t policy,
@@ -191,7 +191,7 @@ int schedule_execute(schedule_context_t *context, schedule_policy_t policy,
 }
 
 /* ------------------------------------------------------------------ */
-/*  schedule_parallel_for  (one-shot, creates+joins threads each call) */
+/* schedule_parallel_for: one-shot thread creation and join            */
 /* ------------------------------------------------------------------ */
 
 typedef struct {
@@ -292,7 +292,7 @@ int schedule_parallel_for(long total_iterations, int num_threads,
 }
 
 /* ------------------------------------------------------------------ */
-/*  schedule_parallel_reduce_long  (one-shot)                          */
+/* schedule_parallel_reduce_long: one-shot reduction helper            */
 /* ------------------------------------------------------------------ */
 
 typedef struct {
@@ -356,7 +356,7 @@ static int schedule_parallel_reduce_long_adapter(chunk_t chunk, int thread_id,
                                                  void *user_data);
 
 /* ------------------------------------------------------------------ */
-/*  Thread Pool                                                        */
+/* Thread pool                                                         */
 /* ------------------------------------------------------------------ */
 
 typedef struct {
@@ -402,7 +402,7 @@ static void *pool_worker_run(void *arg) {
   int last_generation = 0;
 
   for (;;) {
-    /* ---- wait for work ---- */
+    /* Wait for a new task generation or shutdown. */
     pthread_mutex_lock(&pool->mutex);
     while (pool->task_generation == last_generation && !pool->shutdown) {
       pthread_cond_wait(&pool->work_available, &pool->mutex);
@@ -431,7 +431,7 @@ static void *pool_worker_run(void *arg) {
      * blocked and other workers can concurrently signal completion. */
     pthread_mutex_unlock(&pool->mutex);
 
-    /* ---- execute chunks ---- */
+    /* Execute assigned chunks without holding the pool mutex. */
     int local_error = 0;
     while (!is_cancelled(&sched)) {
       chunk_t chunk = schedule_next_chunk(&sched, policy);
@@ -445,7 +445,7 @@ static void *pool_worker_run(void *arg) {
       }
     }
 
-    /* ---- signal completion ---- */
+    /* Publish completion for this worker. */
     pthread_mutex_lock(&pool->mutex);
     if (local_error)
       pool->had_error = 1;

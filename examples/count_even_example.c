@@ -46,21 +46,22 @@ static const char *policy_name(schedule_policy_t policy) {
 }
 
 int main(void) {
-  long n = 10000000; // 10 Million elements
+  /* Allocate enough input to make scheduling differences visible. */
+  long n = 10000000;
   int *data = (int *)malloc(n * sizeof(int));
   if (data == NULL) {
     fprintf(stderr, "Failed to allocate data.\n");
     return EXIT_FAILURE;
   }
 
-  // Generate some random integers
+  /* Use deterministic input so benchmark output is repeatable. */
   srand(42);
   for (long i = 0; i < n; ++i) {
     data[i] = rand();
   }
 
   int num_threads = 4;
-  long chunk_size = 1000; // Sensible chunk size for big workloads
+  long chunk_size = 1000;
 
   schedule_policy_t policies[] = {SCHEDULE_STATIC, SCHEDULE_DYNAMIC,
                                   SCHEDULE_GUIDED};

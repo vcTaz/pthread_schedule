@@ -1,89 +1,134 @@
-# pthread Schedule Module Documentation
+# pthread_schedule
 
-This project provides a lightweight scheduler abstraction for splitting iteration work across POSIX threads.
+`pthread_schedule` is a compact C11 library for distributing loop iterations across POSIX threads with static, dynamic, and guided scheduling policies.
 
-## Files
+It is designed to be small, reusable, and easy to integrate into larger native codebases. The repository includes:
 
-- `include/pthread_schedule.h`: scheduler API, policy enum, and data structures
-- `src/pthread_schedule.c`: scheduler implementations (`static`, `dynamic`, `guided`) and policy dispatcher
-- `examples/count_even_example.c`: Complete example using the library
+- A public scheduling API
+- One-shot parallel loop helpers
+- `long` reduction helpers
+- A reusable thread-pool interface
+- A complete example program
 
-## Building and Running
+## Repository Layout
 
-This project provides both a `Makefile` and `CMakeLists.txt` for easy builds.
+- `include/pthread_schedule.h`: public API declarations
+- `src/pthread_schedule.c`: scheduling implementations and thread-pool support
+- `examples/count_even_example.c`: demonstration program
+- `Makefile`: conventional Unix-style build
+- `CMakeLists.txt`: CMake build definition
 
-### Using Make
-```bash
-make all        # Builds the static library and examples
-./bin/count_even_example
-```
+## Requirements
 
-### Using CMake
-```bash
-mkdir -p build && cd build
-cmake ..
-make
-./count_even_example
-```
+- C11-compatible compiler
+- POSIX threads implementation
+- CMake 3.10 or newer when using CMake
+
+Note: this project targets POSIX threads. On Windows, a compatible pthreads environment is required.
 
 ## Scheduling Policies
 
 ### `SCHEDULE_STATIC`
 
-- Computes each thread range once, based on thread index.
-- Uses balanced partitioning:
-  - Every thread gets `total_iterations / num_threads`
-  - First `total_iterations % num_threads` threads get one extra iteration
-- No mutex required.
-- Best when per-iteration work cost is uniform.
+- Deterministic work assignment by thread index
+- Best when each iteration has similar cost
+- Lowest coordination overhead
+- Supports contiguous partitioning when `chunk_size == 0`
 
 ### `SCHEDULE_DYNAMIC`
 
-- Threads fetch fixed-size chunks from a shared counter.
-- Requires `shared_counter`, `lock`, and positive `chunk_size`.
-- Better load balance when work is irregular.
-- More synchronization overhead due to frequent locking.
+- Fixed-size chunks fetched from a shared counter
+- Better load balancing for irregular work
+- Higher synchronization overhead than static scheduling
+- Requires `chunk_size > 0`
 
 ### `SCHEDULE_GUIDED`
 
-- Threads fetch decreasing chunk sizes as work runs out.
-- Chunk is computed as `ceil(remaining / num_threads)`, clamped to a minimum `chunk_size`.
-- Requires `shared_counter`, `lock`, and positive `chunk_size`.
-- Often a good compromise between dynamic load balance and lock overhead.
+- Chunk sizes shrink as the remaining work decreases
+- Useful when work is uneven but coordination cost still matters
+- Requires `chunk_size > 0`
 
-## API Summary
+## Build
+
+### Make
+
+```bash
+make
+./bin/count_even_example
+```
+
+### CMake
+
+```bash
+cmake -S . -B build
+cmake --build build
+./build/count_even_example
+```
+
+## Public API Overview
+
+Chunk selection:
 
 ```c
 chunk_t schedule_static(schedule_context_t *context);
 chunk_t schedule_dynamic(schedule_context_t *context);
 chunk_t schedule_guided(schedule_context_t *context);
 chunk_t schedule_next_chunk(schedule_context_t *context, schedule_policy_t policy);
+```
+
+Execution helpers:
+
+```c
 int schedule_execute(schedule_context_t *context,
                      schedule_policy_t policy,
                      schedule_chunk_callback_t callback,
                      void *user_data);
+
 int schedule_parallel_for(long total_iterations,
                           int num_threads,
                           long chunk_size,
                           schedule_policy_t policy,
                           schedule_parallel_chunk_callback_t callback,
                           void *user_data);
+
+int schedule_parallel_reduce_long(long total_iterations,
+                                  int num_threads,
+                                  long chunk_size,
+                                  schedule_policy_t policy,
+                                  schedule_parallel_chunk_reduce_long_t callback,
+                                  void *user_data,
+                                  long *out_result);
 ```
 
-`chunk_t`:
+Thread-pool helpers:
 
-- `start_index`: inclusive start
-- `end_index`: exclusive end
-- `done`: non-zero means no more work
+```c
+schedule_thread_pool_t *schedule_thread_pool_create(int num_threads);
+void schedule_thread_pool_destroy(schedule_thread_pool_t *pool);
 
-`schedule_execute(...)` is a convenience API that repeatedly fetches chunks for the selected policy and invokes a callback for each chunk. This avoids writing `while` loops manually in every worker.
+int schedule_parallel_for_pool(schedule_thread_pool_t *pool,
+                               long total_iterations,
+                               long chunk_size,
+                               schedule_policy_t policy,
+                               schedule_parallel_chunk_callback_t callback,
+                               void *user_data);
 
-`schedule_parallel_for(...)` is a higher-level API that also manages thread creation/join and shared scheduling state. This avoids writing custom boilerplate.
-
-## Build Check (Scheduler Unit)
-
-The scheduler implementation compiles with strict warning flags:
-
-```bash
-gcc -Wall -Wextra -Wpedantic -std=c11 -Iinclude src/pthread_schedule.c -c -o /tmp/pthread_schedule.o
+int schedule_parallel_reduce_long_pool(
+    schedule_thread_pool_t *pool,
+    long total_iterations,
+    long chunk_size,
+    schedule_policy_t policy,
+    schedule_parallel_chunk_reduce_long_t callback,
+    void *user_data,
+    long *out_result);
 ```
+
+The public header contains the authoritative API comments.
+
+## Example
+
+[`examples/count_even_example.c`](./examples/count_even_example.c) measures the three scheduling policies while counting even values across a large integer array.
+
+## License
+
+This project is distributed under the terms described in [`LICENSE`](./LICENSE).
